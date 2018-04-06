@@ -14,7 +14,7 @@
 #
 # ----------------------------------------------------------------
 # IMPLEMENTATION
-#    version         script 0.0.4
+#    version         script 0.0.5
 #    author          Greg Milligan
 #    copyright       Copyright (c) 2017 http://www.xybersolve.com
 #    license         GNU General Public License
@@ -144,7 +144,7 @@ show_help() {
 }
 
 # ---------------------------------------
-# MAIN CODE GOES HERE
+# MAIN SCRIPT ROUTINES
 # ---------------------------------------
 source "${CONFIG_FILE}" \
   || die "Unable to load config: ${CONFIG_FILE}" 1
