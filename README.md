@@ -1,34 +1,72 @@
-# jackup
+# jinks
 
-> Archive & backup local Jenkins
+> Script to help start (choose version), stop, backup & restore local Jenkins
 
+### Expectations
+Script expects a few directories to be in place, but these van be changed in
+`jinks.conf.sh` to suit requirements.
+
+### Usefulness
+This script can useful to move between docker and war implementation of Jenkins.
 
 ```sh
-  Script: jackup
-  Purpose: Backup and restore local Jenkins
-  Usage: jackup [options]
+Basic directory structure
 
-Options:
-  --help:  help and usage
-  --version: show version info
-  --home=<jenkins home direcotry>: Directory to backup/restore, default: ~/.jenkins
-  --file=<archive filename>: Archive filename (no path information required)
-  --dist: Copy files from project to local script bin
-  --dryrun|--dry-run: Just show expected source and destinations
+~/jenkins
+  - archives
+     20180304.tgz
+  - war-files
+    - 2.111
+      jenkins.war
+    - 2.112
+      jenkins.war
 
-Examples:
-  Backup:
-    ${PROGNAME} --backup
-    ${PROGNAME} --backup --home=~/jenkins_home
-    ${PROGNAME} --backup --home=~/jenkins_home --dryrun
+```
 
-  Restore
-    ${PROGNAME} --restore --file=20180405.tgz
-    ${PROGNAME} --restore --file=20180405.tgz --dryrun
-    ${PROGNAME} --restore --home=~/jenkins_home --file=20180405.tgz
+### Syntax and Usage, from --help
 
-  Distribute (move files to script bin):
-    ${PROGNAME} --dist
+```sh
+
+  Script: jinks
+  Purpose: Helper script for working with local Jenkins
+  Usage: jinks [options]
+
+  Options:
+    --help:  help and usage
+    --start: Start Jenkins using war file
+    --ver: Version of Jenkins to start
+    --stop: Kill local Jenkins process
+    --backup: Backup Jenkins home directory
+    --restore: Restore Jenkins directory
+    --archives: View archive files
+    --versions: View local war versions
+    --home=<jenkins home direcotry>: Directory to backup/restore, default: ~/.jenkins
+    --file=<archive filename>: Archive filename (no path information required)
+    --dist: Copy files from project to local script bin
+    --dryrun|--dry-run: Just show expected source and destinations
+
+  Examples:
+    Start:
+      ${PROGNAME} --start
+      ${PROGNAME} --start --ver=2.114
+      ${PROGNAME} --start --ver=2.114 --dryrun
+      ${PROGNAME} --stop
+      ${PROGNAME} --stop --dryrun
+
+    Backup:
+      ${PROGNAME} --backup
+      ${PROGNAME} --backup --home=~/jenkins_home
+
+    Restore
+      ${PROGNAME} --restore --file=20180405.tgz
+      ${PROGNAME} --restore --home=~/jenkins_home --file=20180405.tgz
+
+    Helpers:
+      ${PROGNAME} --archives
+      ${PROGNAME} --versions
+
+    Distribute (move files to script bin):
+      ${PROGNAME} --dist
 
 ```
 

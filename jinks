@@ -56,12 +56,13 @@ declare -r SYNTAX=$(cat <<EOF
 
     Script: ${PROGNAME}
     Purpose:
-    Usage: ${PROGNAME} [-h|--help] [-v|--version]
+    Usage: ${PROGNAME} [options]
 
     Options:
-      --help:  help and usage
+      --help: This help file
       --start: Start Jenkins using war file
       --ver: Version of Jenkins to start
+      --stop: Kill local Jenkins process
       --backup: Backup Jenkins home directory
       --restore: Restore Jenkins directory
       --archives: View archive files
