@@ -1,0 +1,318 @@
+#!/usr/bin/env bash
+# ================================================================
+# -*- mode: bash -*-
+# vi: set ft=sh
+# ****************************************************************
+#
+# DESCRIPTION
+#   Jenkins helper script
+#    * start jenkins from war file
+#    * backup and restore Jenkins
+#
+# SYNTAX & EXAMPLES
+#    See 'SYNTAX' (below)
+#
+# ----------------------------------------------------------------
+# IMPLEMENTATION
+#    version         script 0.0.4
+#    author          Greg Milligan
+#    copyright       Copyright (c) 2017 http://www.xybersolve.com
+#    license         GNU General Public License
+#
+# ================================================================
+#  DEBUG OPTION
+#    set -n  # Uncomment to check your syntax, without execution.
+#    set -x  # Uncomment to debug this shell script
+#
+# ---------------------------------------------------------------
+#
+# TODO:
+# ****************************************************************
+
+
+# ---------------------------------------
+# CONFIGFURATION
+# ---------------------------------------
+# strict environment
+set -o errexit  # exit on command error status
+set -o nounset  # no unreadonlyd variables
+set -o pipefail # failr on pipe failures
+trap 'echo "Aborting due to errexit on line $LINENO. Exit code: ${?}" >&2' ERR
+
+# ---------------------------------------
+# GLOBAL VARIABLES
+# ---------------------------------------
+# booleans
+declare -ir TRUE=1
+declare -ir FALSE=0
+# script info
+
+declare -r PROGNAME="$(basename ${0})"
+declare -r VERSION=0.0.1
+declare -r SUBJECT=""
+declare -r KEYS=""
+declare -ri MIN_ARG_COUNT=1
+declare -r SYNTAX=$(cat <<EOF
+
+    Script: ${PROGNAME}
+    Purpose:
+    Usage: ${PROGNAME} [-h|--help] [-v|--version]
+
+    Options:
+      --help:  help and usage
+      --start: Start Jenkins using war file
+      --ver: Version of Jenkins to start
+      --backup: Backup Jenkins home directory
+      --restore: Restore Jenkins directory
+      --archives: View archive files
+      --versions: View local war versions
+      --home=<jenkins home direcotry>: Directory to backup/restore, default: ~/.jenkins
+      --file=<archive filename>: Archive filename (no path information required)
+      --dist: Copy files from project to local script bin
+      --dryrun|--dry-run: Just show expected source and destinations
+
+    Examples:
+      Start:
+        ${PROGNAME} --start
+        ${PROGNAME} --start --ver=2.114
+        ${PROGNAME} --start --ver=2.114 --dryrun
+        ${PROGNAME} --stop
+        ${PROGNAME} --stop --dryrun
+
+      Backup:
+        ${PROGNAME} --backup
+        ${PROGNAME} --backup --home=~/jenkins_home
+
+      Restore
+        ${PROGNAME} --restore --file=20180405.tgz
+        ${PROGNAME} --restore --home=~/jenkins_home --file=20180405.tgz
+
+      Helpers:
+        ${PROGNAME} --archives
+        ${PROGNAME} --versions
+
+      Distribute (move files to script bin):
+        ${PROGNAME} --dist
+
+EOF
+)
+
+# files & directories
+declare -r SCRIPT_DIR="$( dirname ${0} )"
+declare -r CONFIG_FILE="${SCRIPT_DIR}/jinks.conf.sh"
+
+# actions
+declare -i BACKUP=${FALSE}
+declare -i RESTORE=${FALSE}
+declare -i START=${FALSE}
+declare -i STOP=${FALSE}
+declare -i ARCHIVES=${FALSE}
+declare -i VERSIONS=${FALSE}
+declare -i DISTRIBUTE=${FALSE}
+
+# flags
+declare -i DRYRUN=${FALSE}
+
+# global variables
+declare FILENAME=''
+declare HOME_DIR=''
+
+# ---------------------------------------
+# COMMON FUNCTIONS
+# ---------------------------------------
+usage() {
+  echo "${SYNTAX}"
+}
+
+error() {
+  printf "\n%s\n" "Error: ${1}"
+}
+
+die() {
+  error "${1}"
+  usage
+  printf "\n\n"
+  exit "${2:-1}"
+}
+
+show_help() {
+  printf "\n\n"
+  usage
+  printf "\n\n"
+  exit 0
+}
+
+# ---------------------------------------
+# MAIN CODE GOES HERE
+# ---------------------------------------
+source "${CONFIG_FILE}" \
+  || die "Unable to load config: ${CONFIG_FILE}" 1
+
+__check_home() {
+  # check if jenkins home directory was specified
+  # create it if required
+  if [[ -n ${HOME_DIR} ]]; then
+    JENKINS_HOME_DIR="${HOME_DIR}"
+  else
+    echo "Jenkins home directory was not supplied";
+    echo "Default will be used: ${JENKINS_HOME_DIR}";
+  fi
+
+  [[ -d ${JENKINS_HOME_DIR} ]] \
+    || mkdir -p "${JENKINS_HOME_DIR}"
+}
+
+__backup() {
+  local datetime=$(date +%Y%m%d)
+  local filename="${datetime}.tgz"
+  local archive_file="${ARCHIVE_DIR}/${filename}"
+
+  __check_home
+
+  [[ -d ${ARCHIVE_DIR} ]] \
+    || mkdir -p "${ARCHIVE_DIR}"
+
+  if (( DRYRUN )); then
+    echo
+    echo "Back up Jenkins home directory"
+    echo "From: ${JENKINS_HOME_DIR}"
+    echo "To: ${archive_file}"
+    echo
+  else
+    cd "${JENKINS_HOME_DIR}"
+
+    tar -czf "${archive_file}" . &>/dev/null \
+      && printf "\n🍄  Backed Jenkins up to:\n\t%s\n\n" "${archive_file}" \
+      || printf "\n☠️  Failed to back up Jenkins to:\n\t%s\n\n" "${archive_file}"
+  fi
+}
+
+__restore() {
+  local dest_dir
+  local archive_file
+  [[ -z ${FILENAME} ]] \
+    && die "No archive file was specified, use --file=<filename>" 3
+
+  archive_file="${ARCHIVE_DIR}/${FILENAME}"
+
+  __check_home
+
+  # check if the file is there
+  [[ -f "${archive_file}" ]] \
+    || die "☠️  Unable to find archive: ${archive_file}" 2
+
+  if (( DRYRUN )); then
+    echo
+    echo "Restore Jenkins home directory"
+    echo "From: ${archive_file}"
+    echo "To: ${JENKINS_HOME_DIR}"
+    echo
+  else
+    tar -xzf "${archive_file}" -C "${JENKINS_HOME_DIR}" \
+      && printf "\n🍄  Restored Jenkins to:\n\t%s\n\n" "${JENKINS_HOME_DIR}" \
+      || printf "\n☠️  Failed to restore Jenkins from:\n\t%s\n\n" "${archive_file}"
+  fi
+}
+
+__view_archives() {
+  printf "\n💿  Jenkins home archives:\n"
+  find "${ARCHIVE_DIR}" -type f -name *.tgz -exec sh -c 'echo $(basename {})' \;
+  printf "\n"
+}
+
+__view_versions() {
+  printf "\n📦  Jenkins local war versions:\n"
+  find "${JENKINS_WAR_BASE_DIR}" -type d -exec sh -c 'echo $(basename {}) | grep -v war-files' \;
+  printf "\n"
+}
+
+__start() {
+  (( DRYRUN )) \
+    && echo java -jar "${JENKINS_WAR_BASE_DIR}/${JENKINS_VER}/jenkins.war" \
+    || java -jar "${JENKINS_WAR_BASE_DIR}/${JENKINS_VER}/jenkins.war" &
+}
+
+__stop() {
+  if (( DRYRUN )); then
+    ps aux | grep 'jenkins' | grep -v 'grep'
+  else
+    local -r pid=$(ps aux | grep jenkins | grep -v grep | awk '{print $2}')
+
+    # TODO: get confirmation
+
+    if [[ -z ${pid} ]]; then
+      echo "🍒  No jenkins process is currently running"
+    else
+      kill "${pid}" \
+        && echo "⚰️  Killed jenkins pid: ${pid}" \
+        || echo "☠️  Unable to kill jenkins pid: ${pid}"
+    fi
+  fi
+}
+
+__distribute() {
+  # move files into script bin
+  echo "Distribute ${PROGNAME}"
+
+  local file=''
+  local -r dest=~/bin
+  local -ra files=(
+    "${PROGNAME}"
+    "${CONFIG_FILE}"
+  )
+  printf "\n"
+  for file in "${files[@]}"; do
+    cp "${file}" "${dest}" \
+      && printf "👍🏻  Copied: %s to %s\n" "${file}" "${dest}"
+  done
+  printf "\n"
+}
+
+__get_opts() {
+  while (( $# > 0 )); do
+    local arg="${1}"; shift;
+    case ${arg} in
+      --help)    show_help                ;;
+      --backup)           BACKUP=${TRUE}  ;;
+      --restore)         RESTORE=${TRUE}  ;;
+      --start)            START=${TRUE}   ;;
+      --stop)             STOP=${TRUE}    ;;
+      --versions)        VERSIONS=${TRUE} ;;
+      --archives)        ARCHIVES=${TRUE} ;;
+      --dry-run|--dryrun) DRYRUN=${TRUE}  ;;
+      --dist)         DISTRIBUTE=${TRUE}  ;;
+      --ver*)
+        [[ ${arg} =~ '=' ]] && JENKINS_VER="${arg#*=}"
+        ;;
+      --home*)
+        [[ ${arg} =~ '=' ]] && HOME_DIR="${arg#*=}"
+        ;;
+      --file*)
+        [[ ${arg} =~ '=' ]] && FILENAME="${arg#*=}"
+        ;;
+      *) die "Unknown option: ${arg}" ;;
+   esac
+  done
+  return 0
+}
+
+__dispatch() {
+  (( BACKUP )) && __backup
+  (( RESTORE )) && __restore
+  (( START )) && __start
+  (( STOP )) && __stop
+  (( DISTRIBUTE )) && __distribute
+  (( ARCHIVES )) && __view_archives
+  (( VERSIONS )) && __view_versions
+  return 0
+}
+
+__main() {
+  (( ${#} < MIN_ARG_COUNT )) && die "Expects at least ${MIN_ARG_COUNT} arguments" 1
+  (( $# > 0 )) && __get_opts "$@"
+
+  __dispatch
+
+  return 0
+}
+(( ${#} > 0 )) && __main "${@}" || __main
