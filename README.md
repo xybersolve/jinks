@@ -3,14 +3,16 @@
 > Script to help start (choose version), stop, backup & restore local Jenkins
 
 ### Expectations
-Script expects a few directories to be in place, but these van be changed in
+Script expects a few directories to be in place, but these can be changed in
 `jinks.conf.sh` to suit requirements.
 
 ### Usefulness
 This script can useful to move between docker and war implementation of Jenkins.
 
+
+
 ```sh
-Basic directory structure
+Anticipated directory structure
 
 ~/jenkins
   - archives
@@ -69,5 +71,10 @@ Basic directory structure
       ${PROGNAME} --dist
 
 ```
+
+### TODO:
+* Download war version files
+* Confirmation on --stop
+
 
 ## [License](LICENSE.md)
