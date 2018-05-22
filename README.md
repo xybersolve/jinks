@@ -1,19 +1,14 @@
 # jinks
 
-> Script to help start (choose version), stop, backup & restore local Jenkins
+> Script provides some functionality around Jenkins configuration and instantiation.
+Targets war and dockerized Jenkins installs.
 
 ### Expectations
 Script expects a few directories to be in place, but these can be changed in
 `jinks.conf.sh` to suit requirements.
 
-### Purpose
-Provides some functionality around Jenkins configuration and instantiation.
-Targets war and dockerized Jenkins installs.
-
-
 
 ### Syntax and Usage, from --help
-
 ```sh
 
 $jinks --help
@@ -34,7 +29,7 @@ Options:
   --dist: Copy files from project to local script bin
   --dryrun|--dry-run: Just show expected source and destinations
 
-  Jenkin in Docker:
+  Jenkins in Docker:
   --up: start in docker container
   --down: bring down docker container
   --clean: stop dockler container & delete docker iamge
