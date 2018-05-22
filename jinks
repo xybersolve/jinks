@@ -14,7 +14,7 @@
 #
 # ----------------------------------------------------------------
 # IMPLEMENTATION
-#    version         script 0.0.5
+#    version         script 0.0.4
 #    author          Greg Milligan
 #    copyright       Copyright (c) 2017 http://www.xybersolve.com
 #    license         GNU General Public License
@@ -56,39 +56,57 @@ declare -r SYNTAX=$(cat <<EOF
 
     Script: ${PROGNAME}
     Purpose:
-    Usage: ${PROGNAME} [options]
+    Usage: ${PROGNAME} [-h|--help] [-v|--version]
 
     Options:
-      --help: This help file
+      --help:  help and usage
       --start: Start Jenkins using war file
+
+      Jenkins from WAR:
       --ver: Version of Jenkins to start
-      --stop: Kill local Jenkins process
-      --backup: Backup Jenkins home directory
-      --restore: Restore Jenkins directory
-      --archives: View archive files
       --versions: View local war versions
       --home=<jenkins home direcotry>: Directory to backup/restore, default: ~/.jenkins
       --file=<archive filename>: Archive filename (no path information required)
+      --latest: Get the latest jenkins war versions, from updates.jenkins-ci.org
       --dist: Copy files from project to local script bin
       --dryrun|--dry-run: Just show expected source and destinations
 
+      Jenkin in Docker:
+      --up: start in docker container
+      --down: bring down docker container
+      --clean: stop dockler container & delete docker iamge
+      --ssh: SSH into container
+      --logs: attach to docker container logs
+
+      Backup & Restore jenkins_home:
+      --backup: Backup Jenkins home directory
+      --restore: Restore Jenkins directory
+      --archives: View archive files
+
+
     Examples:
-      Start:
+      WAR:
         ${PROGNAME} --start
         ${PROGNAME} --start --ver=2.114
         ${PROGNAME} --start --ver=2.114 --dryrun
         ${PROGNAME} --stop
         ${PROGNAME} --stop --dryrun
 
-      Backup:
+      Docker:
+        ${PROGNAME} --up
+        ${PROGNAME} --restart
+        ${PROGNAME} --down
+        ${PROGNAME} --clean
+        ${PROGNAME} --logs
+
+      Backup & Restore:
         ${PROGNAME} --backup
         ${PROGNAME} --backup --home=~/jenkins_home
-
-      Restore
         ${PROGNAME} --restore --file=20180405.tgz
         ${PROGNAME} --restore --home=~/jenkins_home --file=20180405.tgz
 
       Helpers:
+        ${PROGNAME} --latest
         ${PROGNAME} --archives
         ${PROGNAME} --versions
 
@@ -103,6 +121,7 @@ declare -r SCRIPT_DIR="$( dirname ${0} )"
 declare -r CONFIG_FILE="${SCRIPT_DIR}/jinks.conf.sh"
 
 # actions
+declare -i GET_LATEST=${FALSE}
 declare -i BACKUP=${FALSE}
 declare -i RESTORE=${FALSE}
 declare -i START=${FALSE}
@@ -110,6 +129,12 @@ declare -i STOP=${FALSE}
 declare -i ARCHIVES=${FALSE}
 declare -i VERSIONS=${FALSE}
 declare -i DISTRIBUTE=${FALSE}
+declare -i DOCKER_UP=${FALSE}
+declare -i DOCKER_RESTART=${FALSE}
+declare -i DOCKER_LOGS=${FALSE}
+declare -i DOCKER_DOWN=${FALSE}
+declare -i DOCKER_CLEAN=${FALSE}
+declare -i DOCKER_SSH=${FALSE}
 
 # flags
 declare -i DRYRUN=${FALSE}
@@ -117,6 +142,10 @@ declare -i DRYRUN=${FALSE}
 # global variables
 declare FILENAME=''
 declare HOME_DIR=''
+declare VERSION_TO_RUN=''
+declare -a LOCAL_VERSIONS=()
+declare -a REMOTE_VERSIONS=()
+declare -a REQUIRED_VERSIONS=()
 
 # ---------------------------------------
 # COMMON FUNCTIONS
@@ -144,7 +173,7 @@ show_help() {
 }
 
 # ---------------------------------------
-# MAIN SCRIPT ROUTINES
+# MAIN CODE GOES HERE
 # ---------------------------------------
 source "${CONFIG_FILE}" \
   || die "Unable to load config: ${CONFIG_FILE}" 1
@@ -227,6 +256,92 @@ __view_versions() {
   printf "\n"
 }
 
+__get_local_versions() {
+  LOCAL_VERSIONS=($(find "${JENKINS_WAR_BASE_DIR}" -type d -exec sh -c 'echo $(basename {}) | grep -v war-files' \;))
+}
+
+__get_remote_versions() {
+  local -r url=https://updates.jenkins-ci.org/download/war/
+
+  REMOTE_VERSIONS=($(curl "${url}" 2> /dev/null \
+    | sed '/^\/ >/d' \
+    | sed 's/<[^>]*.//g' \
+    | egrep ^[0-9]+ ))
+}
+
+__get_required_versions() {
+
+  local -a latest=()
+  local ver
+  local -a required_versions=()
+  local -i found=${FALSE}
+  # initialize required versions
+  REQUIRED_VERSIONS=()
+
+  __get_local_versions
+  __get_remote_versions
+  # trim down, only most 6 recent versions
+  remote_versions=("${REMOTE_VERSIONS[@]:0:5}")
+  # determine missiing versions
+  for r in "${remote_versions[@]}"; do
+    skip=
+    for l in "${LOCAL_VERSIONS[@]}"; do
+      [[ $r == $l ]] && { skip=1; break; }
+    done
+    [[ -n $skip ]] || REQUIRED_VERSIONS+=("$r")
+  done
+
+  # a little sanity checking
+  echo "Local Versions: ${LOCAL_VERSIONS[@]}"
+  echo "Remote Versions: ${remote_versions[@]}"
+  echo "Required Versions: ${REQUIRED_VERSIONS[@]}"
+}
+
+__get_latest_versions() {
+  local -r baseUrl=https://updates.jenkins-ci.org/download/war/
+  local url
+  __get_required_versions
+
+  for ver in "${REQUIRED_VERSIONS[@]}"; do
+    local dir="${JENKINS_WAR_BASE_DIR}/${ver}"
+    local path="${dir}/jenkins.war"
+    local url="${baseUrl}/${ver}"
+    printf "👉🏻  Fetching version: %s\n" "${ver}"
+    mkdir -p "${dir}"
+
+    #curl --output "${path}" "${url}" \
+    wget "${url}" -O "${path}" \
+      && printf "👌🏻  Sucessfully downloaded version %s\n" "${ver}" \
+      || printf "☠️  Failed to download version %s\n" "${ver}"
+  done
+}
+
+__choose_version() {
+  # choose jenkins version from available war files
+  #local vers=($(find "${JENKINS_WAR_BASE_DIR}" -type d -exec sh -c 'echo $(basename {}) | grep -v war-files' \;))
+  __get_local_versions
+  echo "${vers[@]}"
+  PS3="Select version to start: "
+  select ver in "${LOCAL_VERSIONS[@]}" "Abort"; do
+    if [[  $ver = "Abort" ]]; then
+      exit 0
+    else
+      # pull the key from the value
+      JENKINS_VER=${ver}
+      return
+    fi
+  done
+}
+
+__start_menu() {
+  __choose_version
+
+  (( DRYRUN )) \
+    && echo java -jar "${JENKINS_WAR_BASE_DIR}/${JENKINS_VER}/jenkins.war" \
+    || java -jar "${JENKINS_WAR_BASE_DIR}/${JENKINS_VER}/jenkins.war" &
+
+}
+
 __start() {
   (( DRYRUN )) \
     && echo java -jar "${JENKINS_WAR_BASE_DIR}/${JENKINS_VER}/jenkins.war" \
@@ -269,6 +384,48 @@ __distribute() {
   printf "\n"
 }
 
+__up() {
+
+  docker run \
+    --name "${JENKINS_CONTAINER}" \
+    -u root \
+    --rm \
+    -d \
+    -p 8080:8080 \
+    -v ~/.jenkins:/var/jenkins_home \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    ${JENKINS_IMAGE}
+}
+
+__restart() {
+  docker container restart "${JENKINS_CONTAINER}"
+
+}
+
+__logs() {
+  docker logs "${JENKINS_CONTAINER}"
+}
+
+
+__down() {
+  docker container stop "${JENKINS_CONTAINER}"
+}
+
+__clean() {
+  docker container stop "${JENKINS_CONTAINER}"
+  docker image rmi "${JENKINS_IMAGE}"
+}
+
+__ssh() {
+  docker exec -it "${JENKINS_CONTAINER}" bash
+}
+
+__open() {
+  local host=$(docker-machine active)
+  local ip=$(docker-machine ip ${host})
+  open "http://${ip}:8080"
+}
+
 __get_opts() {
   while (( $# > 0 )); do
     local arg="${1}"; shift;
@@ -278,6 +435,28 @@ __get_opts() {
       --restore)         RESTORE=${TRUE}  ;;
       --start)            START=${TRUE}   ;;
       --stop)             STOP=${TRUE}    ;;
+      --up*)
+        DOCKER_UP=${TRUE}
+        [[ ${arg} =~ '=' ]] && JENKINS_IMAGE="${arg#*=}"
+        ;;
+      --restart)
+        DOCKER_RESTART=${TRUE}
+        ;;
+      --logs)
+        DOCKER_LOGS=${TRUE}
+        ;;
+      --down)
+        DOCKER_DOWN=${TRUE}
+        ;;
+      --clean)
+        DOCKER_CLEAN=${TRUE}
+        ;;
+      --ssh)
+        DOCKER_SSH=${TRUE}
+        ;;
+      --open)
+        __open; exit 0;
+        ;;
       --versions)        VERSIONS=${TRUE} ;;
       --archives)        ARCHIVES=${TRUE} ;;
       --dry-run|--dryrun) DRYRUN=${TRUE}  ;;
@@ -291,6 +470,12 @@ __get_opts() {
       --file*)
         [[ ${arg} =~ '=' ]] && FILENAME="${arg#*=}"
         ;;
+      --latest) # debug get latest wars
+        GET_LATEST=${TRUE}
+        ;;
+      --local-vers) # debug test
+        __get_local_versions
+        ;;
       *) die "Unknown option: ${arg}" ;;
    esac
   done
@@ -298,10 +483,17 @@ __get_opts() {
 }
 
 __dispatch() {
+  (( GET_LATEST )) && __get_latest_versions
   (( BACKUP )) && __backup
   (( RESTORE )) && __restore
-  (( START )) && __start
+  (( START )) && __start_menu
   (( STOP )) && __stop
+  (( DOCKER_UP )) && __up
+  (( DOCKER_RESTART )) && __restart
+  (( DOCKER_SSH )) && __ssh
+  (( DOCKER_LOGS )) && __logs
+  (( DOCKER_DOWN )) && __down
+  (( DOCKER_CLEAN )) && __clean
   (( DISTRIBUTE )) && __distribute
   (( ARCHIVES )) && __view_archives
   (( VERSIONS )) && __view_versions
@@ -317,3 +509,8 @@ __main() {
   return 0
 }
 (( ${#} > 0 )) && __main "${@}" || __main
+
+:<<'RESOURCES'
+Jenkins war files
+
+RESOURCES
