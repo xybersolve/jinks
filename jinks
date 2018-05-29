@@ -56,24 +56,14 @@ declare -r SYNTAX=$(cat <<EOF
 
     Script: ${PROGNAME}
     Purpose:
-    Usage: ${PROGNAME} [-h|--help] [-v|--version]
+    Usage: ${PROGNAME} [options]
 
     Options:
       --help:  help and usage
-      --start: Start Jenkins using war file
-
-      Jenkins from WAR:
-      --ver: Version of Jenkins to start
-      --versions: View local war versions
-      --home=<jenkins home direcotry>: Directory to backup/restore, default: ~/.jenkins
-      --file=<archive filename>: Archive filename (no path information required)
-      --latest: Get the latest jenkins war versions, from updates.jenkins-ci.org
-      --dist: Copy files from project to local script bin
-      --dryrun|--dry-run: Just show expected source and destinations
 
       Jenkin in Docker:
-      --up: start in docker container
-      --down: bring down docker container
+      --start: start in docker container
+      --stop: bring down docker container
       --clean: stop dockler container & delete docker iamge
       --ssh: SSH into container
       --logs: attach to docker container logs
@@ -83,17 +73,13 @@ declare -r SYNTAX=$(cat <<EOF
       --restore: Restore Jenkins directory
       --archives: View archive files
 
+      Maintanence:
+      --dist: Copy files from project to local script bin
 
     Examples:
       WAR:
         ${PROGNAME} --start
-        ${PROGNAME} --start --ver=2.114
-        ${PROGNAME} --start --ver=2.114 --dryrun
         ${PROGNAME} --stop
-        ${PROGNAME} --stop --dryrun
-
-      Docker:
-        ${PROGNAME} --up
         ${PROGNAME} --restart
         ${PROGNAME} --down
         ${PROGNAME} --clean
@@ -101,14 +87,7 @@ declare -r SYNTAX=$(cat <<EOF
 
       Backup & Restore:
         ${PROGNAME} --backup
-        ${PROGNAME} --backup --home=~/jenkins_home
-        ${PROGNAME} --restore --file=20180405.tgz
-        ${PROGNAME} --restore --home=~/jenkins_home --file=20180405.tgz
-
-      Helpers:
-        ${PROGNAME} --latest
-        ${PROGNAME} --archives
-        ${PROGNAME} --versions
+        ${PROGNAME} --restore
 
       Distribute (move files to script bin):
         ${PROGNAME} --dist
@@ -121,31 +100,30 @@ declare -r SCRIPT_DIR="$( dirname ${0} )"
 declare -r CONFIG_FILE="${SCRIPT_DIR}/jinks.conf.sh"
 
 # actions
-declare -i GET_LATEST=${FALSE}
-declare -i BACKUP=${FALSE}
-declare -i RESTORE=${FALSE}
 declare -i START=${FALSE}
 declare -i STOP=${FALSE}
+declare -i RESTART=${FALSE}
+declare -i LOGS=${FALSE}
+declare -i DOWN=${FALSE}
+declare -i CLEAN=${FALSE}
+declare -i SSH=${FALSE}
+declare -i VOLUME_CREATE=${FALSE}
+declare -i VOLUME_COMMIT=${FALSE}
+declare -i VOLUYME_PUSH=${FALSE}
+
+
+declare -i BACKUP=${FALSE}
+declare -i RESTORE=${FALSE}
 declare -i ARCHIVES=${FALSE}
 declare -i VERSIONS=${FALSE}
+
 declare -i DISTRIBUTE=${FALSE}
-declare -i DOCKER_UP=${FALSE}
-declare -i DOCKER_RESTART=${FALSE}
-declare -i DOCKER_LOGS=${FALSE}
-declare -i DOCKER_DOWN=${FALSE}
-declare -i DOCKER_CLEAN=${FALSE}
-declare -i DOCKER_SSH=${FALSE}
 
 # flags
 declare -i DRYRUN=${FALSE}
 
 # global variables
-declare FILENAME=''
 declare HOME_DIR=''
-declare VERSION_TO_RUN=''
-declare -a LOCAL_VERSIONS=()
-declare -a REMOTE_VERSIONS=()
-declare -a REQUIRED_VERSIONS=()
 
 # ---------------------------------------
 # COMMON FUNCTIONS
@@ -179,191 +157,150 @@ source "${CONFIG_FILE}" \
   || die "Unable to load config: ${CONFIG_FILE}" 1
 
 __check_home() {
+  :
   # check if jenkins home directory was specified
   # create it if required
-  if [[ -n ${HOME_DIR} ]]; then
-    JENKINS_HOME_DIR="${HOME_DIR}"
-  else
-    echo "Jenkins home directory was not supplied";
-    echo "Default will be used: ${JENKINS_HOME_DIR}";
-  fi
-
-  [[ -d ${JENKINS_HOME_DIR} ]] \
-    || mkdir -p "${JENKINS_HOME_DIR}"
+  # if [[ -n ${HOME_DIR} ]]; then
+  #   JENKINS_HOME_DIR="${HOME_DIR}"
+  # else
+  #   echo "Jenkins home directory was not supplied";
+  #   echo "Default will be used: ${JENKINS_HOME_DIR}";
+  # fi
+  #
+  # [[ -d ${JENKINS_HOME_DIR} ]] \
+  #   || mkdir -p "${JENKINS_HOME_DIR}"
 }
 
 __backup() {
+  # backup the container volume to hard drive
   local datetime=$(date +%Y%m%d)
-  local filename="${datetime}.tgz"
-  local archive_file="${ARCHIVE_DIR}/${filename}"
+  local archive_dir="${ARCHIVE_DIR}/${datetime}"
 
-  __check_home
-
-  [[ -d ${ARCHIVE_DIR} ]] \
-    || mkdir -p "${ARCHIVE_DIR}"
-
-  if (( DRYRUN )); then
-    echo
-    echo "Back up Jenkins home directory"
-    echo "From: ${JENKINS_HOME_DIR}"
-    echo "To: ${archive_file}"
-    echo
-  else
-    cd "${JENKINS_HOME_DIR}"
-
-    tar -czf "${archive_file}" . &>/dev/null \
-      && printf "\n🍄  Backed Jenkins up to:\n\t%s\n\n" "${archive_file}" \
-      || printf "\n☠️  Failed to back up Jenkins to:\n\t%s\n\n" "${archive_file}"
-  fi
+  [[ -d "${archive_dir}" ]] || mkdir -p "${archive_dir}"
+  docker cp ${JENKINS_VOLUME}:/var/jenkins_home "${archive_dir}"
+  #__check_home
+  # [[ -d ${ARCHIVE_DIR} ]] \
+  #   || mkdir -p "${ARCHIVE_DIR}"
+  #
+  # if (( DRYRUN )); then
+  #   echo
+  #   echo "Back up Jenkins home directory"
+  #   echo "From: ${JENKINS_HOME_DIR}"
+  #   echo "To: ${archive_file}"
+  #   echo
+  # else
+  #   cd "${JENKINS_HOME_DIR}"
+  #
+  #   tar -czf "${archive_file}" . &>/dev/null \
+  #     && printf "\n🍄  Backed Jenkins up to:\n\t%s\n\n" "${archive_file}" \
+  #     || printf "\n☠️  Failed to back up Jenkins to:\n\t%s\n\n" "${archive_file}"
+  # fi
 }
 
 __restore() {
   local dest_dir
   local archive_file
-  [[ -z ${FILENAME} ]] \
-    && die "No archive file was specified, use --file=<filename>" 3
-
-  archive_file="${ARCHIVE_DIR}/${FILENAME}"
-
-  __check_home
-
-  # check if the file is there
-  [[ -f "${archive_file}" ]] \
-    || die "☠️  Unable to find archive: ${archive_file}" 2
-
-  if (( DRYRUN )); then
-    echo
-    echo "Restore Jenkins home directory"
-    echo "From: ${archive_file}"
-    echo "To: ${JENKINS_HOME_DIR}"
-    echo
-  else
-    tar -xzf "${archive_file}" -C "${JENKINS_HOME_DIR}" \
-      && printf "\n🍄  Restored Jenkins to:\n\t%s\n\n" "${JENKINS_HOME_DIR}" \
-      || printf "\n☠️  Failed to restore Jenkins from:\n\t%s\n\n" "${archive_file}"
-  fi
+  :
+  # [[ -z ${FILENAME} ]] \
+  #   && die "No archive file was specified, use --file=<filename>" 3
+  #
+  # archive_file="${ARCHIVE_DIR}/${FILENAME}"
+  #
+  # __check_home
+  #
+  # # check if the file is there
+  # [[ -f "${archive_file}" ]] \
+  #   || die "☠️  Unable to find archive: ${archive_file}" 2
+  #
+  # if (( DRYRUN )); then
+  #   echo
+  #   echo "Restore Jenkins home directory"
+  #   echo "From: ${archive_file}"
+  #   echo "To: ${JENKINS_HOME_DIR}"
+  #   echo
+  # else
+  #   tar -xzf "${archive_file}" -C "${JENKINS_HOME_DIR}" \
+  #     && printf "\n🍄  Restored Jenkins to:\n\t%s\n\n" "${JENKINS_HOME_DIR}" \
+  #     || printf "\n☠️  Failed to restore Jenkins from:\n\t%s\n\n" "${archive_file}"
+  # fi
 }
 
-__view_archives() {
-  printf "\n💿  Jenkins home archives:\n"
-  find "${ARCHIVE_DIR}" -type f -name *.tgz -exec sh -c 'echo $(basename {})' \;
-  printf "\n"
+__choose_restore() {
+  # echo "${vers[@]}"
+  # PS3="Select version to start: "
+  # select ver in "${LOCAL_VERSIONS[@]}" "Abort"; do
+  #   if [[  $ver = "Abort" ]]; then
+  #     exit 0
+  #   else
+  #     # pull the key from the value
+  #     JENKINS_VER=${ver}
+  #     return
+  #   fi
+  # done
+  :
 }
 
-__view_versions() {
-  printf "\n📦  Jenkins local war versions:\n"
-  find "${JENKINS_WAR_BASE_DIR}" -type d -exec sh -c 'echo $(basename {}) | grep -v war-files' \;
-  printf "\n"
+__create_volume() {
+  # should only have to do this once
+  # create volume in busybox container
+  docker create -v /var/jenkins_home --name jenkins_home busybox
+  # copy the local jenkins home directory into volume
+  docker cp ~/.jenkins/. jenkins_home:/var/jenkins_home
 }
 
-__get_local_versions() {
-  LOCAL_VERSIONS=($(find "${JENKINS_WAR_BASE_DIR}" -type d -exec sh -c 'echo $(basename {}) | grep -v war-files' \;))
+__view_volume() {
+  docker exec -it jenkins_home ls /var/jenkins_home
 }
 
-__get_remote_versions() {
-  local -r url=https://updates.jenkins-ci.org/download/war/
-
-  REMOTE_VERSIONS=($(curl "${url}" 2> /dev/null \
-    | sed '/^\/ >/d' \
-    | sed 's/<[^>]*.//g' \
-    | egrep ^[0-9]+ ))
-}
-
-__get_required_versions() {
-
-  local -a latest=()
-  local ver
-  local -a required_versions=()
-  local -i found=${FALSE}
-  # initialize required versions
-  REQUIRED_VERSIONS=()
-
-  __get_local_versions
-  __get_remote_versions
-  # trim down, only most 6 recent versions
-  remote_versions=("${REMOTE_VERSIONS[@]:0:5}")
-  # determine missiing versions
-  for r in "${remote_versions[@]}"; do
-    skip=
-    for l in "${LOCAL_VERSIONS[@]}"; do
-      [[ $r == $l ]] && { skip=1; break; }
-    done
-    [[ -n $skip ]] || REQUIRED_VERSIONS+=("$r")
-  done
-
-  # a little sanity checking
-  echo "Local Versions: ${LOCAL_VERSIONS[@]}"
-  echo "Remote Versions: ${remote_versions[@]}"
-  echo "Required Versions: ${REQUIRED_VERSIONS[@]}"
-}
-
-__get_latest_versions() {
-  local -r baseUrl=https://updates.jenkins-ci.org/download/war/
-  local url
-  __get_required_versions
-
-  for ver in "${REQUIRED_VERSIONS[@]}"; do
-    local dir="${JENKINS_WAR_BASE_DIR}/${ver}"
-    local path="${dir}/jenkins.war"
-    local url="${baseUrl}/${ver}"
-    printf "👉🏻  Fetching version: %s\n" "${ver}"
-    mkdir -p "${dir}"
-
-    #curl --output "${path}" "${url}" \
-    wget "${url}" -O "${path}" \
-      && printf "👌🏻  Sucessfully downloaded version %s\n" "${ver}" \
-      || printf "☠️  Failed to download version %s\n" "${ver}"
-  done
-}
-
-__choose_version() {
-  # choose jenkins version from available war files
-  #local vers=($(find "${JENKINS_WAR_BASE_DIR}" -type d -exec sh -c 'echo $(basename {}) | grep -v war-files' \;))
-  __get_local_versions
-  echo "${vers[@]}"
-  PS3="Select version to start: "
-  select ver in "${LOCAL_VERSIONS[@]}" "Abort"; do
-    if [[  $ver = "Abort" ]]; then
-      exit 0
-    else
-      # pull the key from the value
-      JENKINS_VER=${ver}
-      return
-    fi
-  done
-}
-
-__start_menu() {
-  __choose_version
-
-  (( DRYRUN )) \
-    && echo java -jar "${JENKINS_WAR_BASE_DIR}/${JENKINS_VER}/jenkins.war" \
-    || java -jar "${JENKINS_WAR_BASE_DIR}/${JENKINS_VER}/jenkins.war" &
-
+__commit_volume() {
+  docker "${JENKINS_HOME_CONTAINER}" "${JENKINS_HOME_IMAGE}:latest"
 }
 
 __start() {
-  (( DRYRUN )) \
-    && echo java -jar "${JENKINS_WAR_BASE_DIR}/${JENKINS_VER}/jenkins.war" \
-    || java -jar "${JENKINS_WAR_BASE_DIR}/${JENKINS_VER}/jenkins.war" &
+
+  docker run \
+    --name "${JENKINS_CONTAINER}" \
+    -u root \
+    --rm \
+    -d \
+    -p 8080:8080 \
+    --volumes-from "${JENKINS_HOME_CONTAINER}" \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    "${JENKINS_IMAGE}"
+
+    # mapped jenkins home
+    # -v ~/.jenkins:/var/jenkins_home \
+    # persistent volume jenkins home
+    # --volumes-from jenkins_home
 }
 
+__restart() {
+  docker container restart "${JENKINS_CONTAINER}"
+
+}
+
+__logs() {
+  docker logs "${JENKINS_CONTAINER}"
+}
+
+
 __stop() {
-  if (( DRYRUN )); then
-    ps aux | grep 'jenkins' | grep -v 'grep'
-  else
-    local -r pid=$(ps aux | grep jenkins | grep -v grep | awk '{print $2}')
+  docker container stop "${JENKINS_CONTAINER}" || true
+}
 
-    # TODO: get confirmation
+__clean() {
+  __stop
+  docker image rmi "${JENKINS_IMAGE}"
+}
 
-    if [[ -z ${pid} ]]; then
-      echo "🍒  No jenkins process is currently running"
-    else
-      kill "${pid}" \
-        && echo "⚰️  Killed jenkins pid: ${pid}" \
-        || echo "☠️  Unable to kill jenkins pid: ${pid}"
-    fi
-  fi
+__ssh() {
+  docker exec -it "${JENKINS_CONTAINER}" bash
+}
+
+__open() {
+  local host=$(docker-machine active)
+  local ip=$(docker-machine ip ${host})
+  open "http://${ip}:8080"
 }
 
 __distribute() {
@@ -384,97 +321,48 @@ __distribute() {
   printf "\n"
 }
 
-__up() {
-
-  docker run \
-    --name "${JENKINS_CONTAINER}" \
-    -u root \
-    --rm \
-    -d \
-    -p 8080:8080 \
-    -v ~/.jenkins:/var/jenkins_home \
-    -v /var/run/docker.sock:/var/run/docker.sock \
-    ${JENKINS_IMAGE}
-}
-
-__restart() {
-  docker container restart "${JENKINS_CONTAINER}"
-
-}
-
-__logs() {
-  docker logs "${JENKINS_CONTAINER}"
-}
-
-
-__down() {
-  docker container stop "${JENKINS_CONTAINER}"
-}
-
-__clean() {
-  docker container stop "${JENKINS_CONTAINER}"
-  docker image rmi "${JENKINS_IMAGE}"
-}
-
-__ssh() {
-  docker exec -it "${JENKINS_CONTAINER}" bash
-}
-
-__open() {
-  local host=$(docker-machine active)
-  local ip=$(docker-machine ip ${host})
-  open "http://${ip}:8080"
-}
-
 __get_opts() {
   while (( $# > 0 )); do
     local arg="${1}"; shift;
     case ${arg} in
-      --help)    show_help                ;;
-      --backup)           BACKUP=${TRUE}  ;;
-      --restore)         RESTORE=${TRUE}  ;;
-      --start)            START=${TRUE}   ;;
-      --stop)             STOP=${TRUE}    ;;
-      --up*)
-        DOCKER_UP=${TRUE}
-        [[ ${arg} =~ '=' ]] && JENKINS_IMAGE="${arg#*=}"
+      --help)
+        show_help
+        ;;
+      --start)
+        START=${TRUE}
+        ;;
+      --stop)
+        STOP=${TRUE}
         ;;
       --restart)
-        DOCKER_RESTART=${TRUE}
+        RESTART=${TRUE}
         ;;
       --logs)
-        DOCKER_LOGS=${TRUE}
-        ;;
-      --down)
-        DOCKER_DOWN=${TRUE}
+        LOGS=${TRUE}
         ;;
       --clean)
-        DOCKER_CLEAN=${TRUE}
+        CLEAN=${TRUE}
         ;;
       --ssh)
-        DOCKER_SSH=${TRUE}
+        SSH=${TRUE}
         ;;
       --open)
         __open; exit 0;
         ;;
-      --versions)        VERSIONS=${TRUE} ;;
-      --archives)        ARCHIVES=${TRUE} ;;
-      --dry-run|--dryrun) DRYRUN=${TRUE}  ;;
-      --dist)         DISTRIBUTE=${TRUE}  ;;
-      --ver*)
-        [[ ${arg} =~ '=' ]] && JENKINS_VER="${arg#*=}"
+      --volume)
+        __create_volume
         ;;
-      --home*)
-        [[ ${arg} =~ '=' ]] && HOME_DIR="${arg#*=}"
+      --view)
+        __view_volume
         ;;
-      --file*)
-        [[ ${arg} =~ '=' ]] && FILENAME="${arg#*=}"
+      --backup)
+        BACKUP=${TRUE}
         ;;
-      --latest) # debug get latest wars
-        GET_LATEST=${TRUE}
+      --restore)
+        RESTORE=${TRUE}
         ;;
-      --local-vers) # debug test
-        __get_local_versions
+      --dist)
+        DISTRIBUTE=${TRUE}
         ;;
       *) die "Unknown option: ${arg}" ;;
    esac
@@ -483,20 +371,20 @@ __get_opts() {
 }
 
 __dispatch() {
-  (( GET_LATEST )) && __get_latest_versions
-  (( BACKUP )) && __backup
-  (( RESTORE )) && __restore
   (( START )) && __start_menu
   (( STOP )) && __stop
-  (( DOCKER_UP )) && __up
-  (( DOCKER_RESTART )) && __restart
-  (( DOCKER_SSH )) && __ssh
-  (( DOCKER_LOGS )) && __logs
-  (( DOCKER_DOWN )) && __down
-  (( DOCKER_CLEAN )) && __clean
-  (( DISTRIBUTE )) && __distribute
+  (( RESTORE )) && __restore
+  (( RESTART )) && __restart
+  (( SSH )) && __ssh
+  (( LOGS )) && __logs
+  (( DOWN )) && __down
+  (( CLEAN )) && __clean
+
+  (( BACKUP )) && __backup
   (( ARCHIVES )) && __view_archives
-  (( VERSIONS )) && __view_versions
+  (( DISTRIBUTE )) && __distribute
+
+
   return 0
 }
 
