@@ -26,7 +26,8 @@
 #
 # ---------------------------------------------------------------
 #
-# TODO:
+# TODO: Refactor WAR backup & restore to dockerized backup & restore
+# TODO: Finish docker-compose & make, i.e., map jenkins_home
 # ****************************************************************
 
 
@@ -62,11 +63,14 @@ declare -r SYNTAX=$(cat <<EOF
       --help:  help and usage
 
       Jenkin in Docker:
-      --start: start in docker container
-      --stop: bring down docker container
-      --clean: stop dockler container & delete docker iamge
-      --ssh: SSH into container
+      --start|--run|--up: instantiate docker container
+      --stop|--down: bring down docker container
+      --clean: stop docker container & delete docker iamge
+      --ssh: SSH into Jenkins container
       --logs: attach to docker container logs
+
+      Volume:
+      --commit: Commit jenkins_home data container to an image
 
       Backup & Restore jenkins_home:
       --backup: Backup Jenkins home directory
@@ -77,13 +81,17 @@ declare -r SYNTAX=$(cat <<EOF
       --dist: Copy files from project to local script bin
 
     Examples:
-      WAR:
-        ${PROGNAME} --start
-        ${PROGNAME} --stop
-        ${PROGNAME} --restart
-        ${PROGNAME} --down
-        ${PROGNAME} --clean
-        ${PROGNAME} --logs
+      ${PROGNAME} --start --|
+      ${PROGNAME} --run ----|-- all start Jenkins
+      ${PROGNAME} --up -----|
+      ${PROGNAME} --stop -----|
+      ${PROGNAME} --down -----| -- all stop Jenkins
+      ${PROGNAME} --restart
+      ${PROGNAME} --clean
+      ${PROGNAME} --logs
+
+      Volume:
+        ${PROGNAME} --commit
 
       Backup & Restore:
         ${PROGNAME} --backup
@@ -100,6 +108,7 @@ declare -r SCRIPT_DIR="$( dirname ${0} )"
 declare -r CONFIG_FILE="${SCRIPT_DIR}/jinks.conf.sh"
 
 # actions
+# docker main
 declare -i START=${FALSE}
 declare -i STOP=${FALSE}
 declare -i RESTART=${FALSE}
@@ -107,11 +116,12 @@ declare -i LOGS=${FALSE}
 declare -i DOWN=${FALSE}
 declare -i CLEAN=${FALSE}
 declare -i SSH=${FALSE}
+# volume
 declare -i VOLUME_CREATE=${FALSE}
+declare -i VOLUME_VIEW=${FALSE}
 declare -i VOLUME_COMMIT=${FALSE}
-declare -i VOLUYME_PUSH=${FALSE}
-
-
+declare -i VOLUME_PUSH=${FALSE}
+# backup & restore
 declare -i BACKUP=${FALSE}
 declare -i RESTORE=${FALSE}
 declare -i ARCHIVES=${FALSE}
@@ -155,6 +165,66 @@ show_help() {
 # ---------------------------------------
 source "${CONFIG_FILE}" \
   || die "Unable to load config: ${CONFIG_FILE}" 1
+
+__start() {
+
+  docker run \
+    --name "${JENKINS_CONTAINER}" \
+    -u root \
+    --rm \
+    -d \
+    -p 8080:8080 \
+    --volumes-from "${JENKINS_HOME_CONTAINER}" \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    "${JENKINS_IMAGE}"
+}
+
+__restart() {
+  docker container restart "${JENKINS_CONTAINER}"
+
+}
+
+__logs() {
+  docker logs "${JENKINS_CONTAINER}"
+}
+
+
+__stop() {
+  docker container stop "${JENKINS_CONTAINER}" || true
+}
+
+__clean() {
+  __stop
+  docker image rmi "${JENKINS_IMAGE}"
+}
+
+
+__create_volume() {
+  # should only have to do this once
+  # create volume in busybox container
+  docker create -v /var/jenkins_home --name jenkins_home busybox
+  # copy the local jenkins home directory into volume
+  docker cp ~/.jenkins/. jenkins_home:/var/jenkins_home
+}
+
+__view_volume() {
+  docker exec -it jenkins_home ls /var/jenkins_home
+}
+
+__commit_volume() {
+  docker commit "${JENKINS_HOME_CONTAINER}" "${JENKINS_HOME_IMAGE}:latest"
+}
+
+
+__ssh() {
+  docker exec -it "${JENKINS_CONTAINER}" bash
+}
+
+__open() {
+  local host=$(docker-machine active)
+  local ip=$(docker-machine ip ${host})
+  open "http://${ip}:8080"
+}
 
 __check_home() {
   :
@@ -240,68 +310,6 @@ __choose_restore() {
   :
 }
 
-__create_volume() {
-  # should only have to do this once
-  # create volume in busybox container
-  docker create -v /var/jenkins_home --name jenkins_home busybox
-  # copy the local jenkins home directory into volume
-  docker cp ~/.jenkins/. jenkins_home:/var/jenkins_home
-}
-
-__view_volume() {
-  docker exec -it jenkins_home ls /var/jenkins_home
-}
-
-__commit_volume() {
-  docker "${JENKINS_HOME_CONTAINER}" "${JENKINS_HOME_IMAGE}:latest"
-}
-
-__start() {
-
-  docker run \
-    --name "${JENKINS_CONTAINER}" \
-    -u root \
-    --rm \
-    -d \
-    -p 8080:8080 \
-    --volumes-from "${JENKINS_HOME_CONTAINER}" \
-    -v /var/run/docker.sock:/var/run/docker.sock \
-    "${JENKINS_IMAGE}"
-
-    # mapped jenkins home
-    # -v ~/.jenkins:/var/jenkins_home \
-    # persistent volume jenkins home
-    # --volumes-from jenkins_home
-}
-
-__restart() {
-  docker container restart "${JENKINS_CONTAINER}"
-
-}
-
-__logs() {
-  docker logs "${JENKINS_CONTAINER}"
-}
-
-
-__stop() {
-  docker container stop "${JENKINS_CONTAINER}" || true
-}
-
-__clean() {
-  __stop
-  docker image rmi "${JENKINS_IMAGE}"
-}
-
-__ssh() {
-  docker exec -it "${JENKINS_CONTAINER}" bash
-}
-
-__open() {
-  local host=$(docker-machine active)
-  local ip=$(docker-machine ip ${host})
-  open "http://${ip}:8080"
-}
 
 __distribute() {
   # move files into script bin
@@ -328,10 +336,10 @@ __get_opts() {
       --help)
         show_help
         ;;
-      --start)
+      --start|--run|--up)
         START=${TRUE}
         ;;
-      --stop)
+      --stop|--down)
         STOP=${TRUE}
         ;;
       --restart)
@@ -350,16 +358,19 @@ __get_opts() {
         __open; exit 0;
         ;;
       --volume)
-        __create_volume
+        VOLUME_CREATE=${TRUE}
         ;;
       --view)
-        __view_volume
+        VOLUME_VIEW=${TRUE}
         ;;
       --backup)
         BACKUP=${TRUE}
         ;;
       --restore)
         RESTORE=${TRUE}
+        ;;
+      --commit)
+        VOLUME_COMMIT=${TRUE}
         ;;
       --dist)
         DISTRIBUTE=${TRUE}
@@ -371,7 +382,7 @@ __get_opts() {
 }
 
 __dispatch() {
-  (( START )) && __start_menu
+  (( START )) && __start
   (( STOP )) && __stop
   (( RESTORE )) && __restore
   (( RESTART )) && __restart
@@ -380,6 +391,12 @@ __dispatch() {
   (( DOWN )) && __down
   (( CLEAN )) && __clean
 
+  # volume
+  (( VOLUME_CREATE )) && __create_volume
+  (( VOLUME_VIEW )) && __view_volume
+  (( VOLUME_COMMIT )) && __commit_volume
+
+  # backup
   (( BACKUP )) && __backup
   (( ARCHIVES )) && __view_archives
   (( DISTRIBUTE )) && __distribute

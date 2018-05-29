@@ -1,28 +1,49 @@
-version: '3'
+version: '2'
 services:
-  data:
-    image: xs-jenkins-data2
-    build:
-      context: .
-      dockerfile: Dockerfile.data
-
   master:
-    image: xs-jenkins-blueocean2
+    image: xybersolve/xs-jenkins-blue
     build:
       context: .
       dockerfile: Dockerfile.blueocean
+    container_name:  xs-jenkins-blue
+    volumes_from:
+      - jenkins_home
     volumes:
-      - data:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
     ports:
-      - "50000:50000"
+      - "8080:8080"
+    networks:
+      - jenkins-network
 
   nginx:
-    build: jenkins-nginx
+    image: xybersolve/xs-jenkins-nginx
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile.nginx
+    container_name: xs-jenkins-nginx
+    environment:
+      - HTTP_PORT=${HTTP_PORT}
     ports:
-      - "${HTTP_PORT}:80" # Need to make this configurable, as we'll want 80:80 in 'prod' environments
+      - "8282:80"
     links:
       - master:jenkins-master
+    networks:
+      - jenkins-network
 
 volumes:
-  jenkins_data:
+  jenkins_home:
+
+networks:
+  jenkins-network:
+    driver: bridge
   #  external: true
+
+  # docker run \
+  #   --name "${JENKINS_CONTAINER}" \
+  #   -u root \
+  #   --rm \
+  #   -d \
+  #   -p 8080:8080 \
+  #   --volumes-from "${JENKINS_HOME_CONTAINER}" \
+  #   -v /var/run/docker.sock:/var/run/docker.sock \
+  #   "${JENKINS_IMAGE}"

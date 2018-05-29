@@ -17,10 +17,10 @@ declare ORG=xybersolve
 #declare JENKINS_CONTAINER=jenkins-blueocean
 
 # xybersolve jenkins blueocean
-declare JENKINS_VOLUME=jenkins_home
 declare JENKINS_IMAGE=xybersolve/xs-jenkins-blue:latest
 declare JENKINS_CONTAINER=xs-jenkins-blue
 
 # volume
+declare JENKINS_VOLUME=jenkins_home
 declare JENKINS_HOME_CONTAINER=jenkins_home
 declare JENKINS_HOME_IMAGE=xs-jenkins-home

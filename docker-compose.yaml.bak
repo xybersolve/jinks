@@ -1,0 +1,28 @@
+version: '3'
+services:
+  data:
+    image: xs-jenkins-data2
+    build:
+      context: .
+      dockerfile: Dockerfile.data
+
+  master:
+    image: xs-jenkins-blueocean2
+    build:
+      context: .
+      dockerfile: Dockerfile.blueocean
+    volumes:
+      - data:/var/jenkins_home
+    ports:
+      - "50000:50000"
+
+  nginx:
+    build: jenkins-nginx
+    ports:
+      - "${HTTP_PORT}:80" # Need to make this configurable, as we'll want 80:80 in 'prod' environments
+    links:
+      - master:jenkins-master
+
+volumes:
+  jenkins_data:
+  #  external: true
