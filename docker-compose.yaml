@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile.blueocean
     container_name:  xs-jenkins-blue
     volumes_from:
-      - jenkins_home
+      - home_data
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
@@ -29,6 +29,11 @@ services:
       - master:jenkins-master
     networks:
       - jenkins-network
+
+  home_data:
+    image: busybox
+    volumes:
+      - jenkins_home
 
 volumes:
   jenkins_home:

@@ -21,6 +21,6 @@ declare JENKINS_IMAGE=xybersolve/xs-jenkins-blue:latest
 declare JENKINS_CONTAINER=xs-jenkins-blue
 
 # volume
-declare JENKINS_VOLUME=jenkins_home
-declare JENKINS_HOME_CONTAINER=jenkins_home
-declare JENKINS_HOME_IMAGE=xs-jenkins-home
+declare JENKINS_HOME_VOLUME=xs_jenkins_home
+declare JENKINS_HOME_IMAGE=xs_jenkins_home
+declare JENKINS_HOME_CONTAINER=xs_jenkins_home

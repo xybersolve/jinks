@@ -91,7 +91,10 @@ declare -r SYNTAX=$(cat <<EOF
       ${PROGNAME} --logs
 
       Volume:
-        ${PROGNAME} --commit
+        ${PROGNAME} --create-volume
+        ${PROGNAME} --mount-volume
+        ${PROGNAME} --commit-volume
+        ${PROGNAME} --view-volume
 
       Backup & Restore:
         ${PROGNAME} --backup
@@ -118,8 +121,11 @@ declare -i CLEAN=${FALSE}
 declare -i SSH=${FALSE}
 # volume
 declare -i VOLUME_CREATE=${FALSE}
+declare -i VOLUME_MOUNT=${FALSE}
 declare -i VOLUME_VIEW=${FALSE}
+declare -i VOLUME_SSH=${FALSE}
 declare -i VOLUME_COMMIT=${FALSE}
+declare -i VOLUME_RESTORE=${FALSE}
 declare -i VOLUME_PUSH=${FALSE}
 # backup & restore
 declare -i BACKUP=${FALSE}
@@ -198,23 +204,45 @@ __clean() {
   docker image rmi "${JENKINS_IMAGE}"
 }
 
+__mount_volume() {
+  #docker run -v "${JENKINS_HOME_DIR}" --name=${JENKINS_HOME_CONTAINER} busybox true
+  docker create -v "${JENKINS_HOME_DIR}" --name=${JENKINS_HOME_CONTAINER} busybox true
+}
 
 __create_volume() {
   # should only have to do this once
   # create volume in busybox container
-  docker create -v /var/jenkins_home --name jenkins_home busybox
+  #docker volume create ${JENKINS_HOME_VOLUME}
+  #docker create -v /var/jenkins_home --name=${JENKINS_HOME_CONTAINER} busybox
+  docker create -v ${JENKINS_HOME_DIR} --name=${JENKINS_HOME_CONTAINER} busybox
+  #docker run -v ${JENKINS_HOME_DIR} --name=${JENKINS_HOME_CONTAINER} busybox true
+  #docker run -v ${JENKINS_HOME_VOLUME}  busybox
   # copy the local jenkins home directory into volume
-  docker cp ~/.jenkins/. jenkins_home:/var/jenkins_home
-}
-
-__view_volume() {
-  docker exec -it jenkins_home ls /var/jenkins_home
 }
 
 __commit_volume() {
   docker commit "${JENKINS_HOME_CONTAINER}" "${JENKINS_HOME_IMAGE}:latest"
 }
 
+__restore_volume() {
+  docker cp ${JENKINS_HOME_DIR}/. ${JENKINS_HOME_CONTAINER}:/var/jenkins_home
+}
+
+__setup_volume() {
+  # these are the steps that work to persist the jenkins home volume 
+  docker create -v ${JENKINS_HOME_DIR} --name=${JENKINS_HOME_CONTAINER} busybox
+  docker cp ${JENKINS_HOME_DIR}/. ${JENKINS_HOME_CONTAINER}:/var/jenkins_home
+}
+
+
+__view_volume() {
+  #docker exec -it jenkins_home ls /var/jenkins_home
+  docker run -it --rm ${JENKINS_HOME_CONTAINER} sh
+}
+
+__ssh_volume() {
+  docker run -it --rm --volumes-from "${JENKINS_HOME_VOLUME}" busybox sh
+}
 
 __ssh() {
   docker exec -it "${JENKINS_CONTAINER}" bash
@@ -247,7 +275,7 @@ __backup() {
   local archive_dir="${ARCHIVE_DIR}/${datetime}"
 
   [[ -d "${archive_dir}" ]] || mkdir -p "${archive_dir}"
-  docker cp ${JENKINS_VOLUME}:/var/jenkins_home "${archive_dir}"
+  docker cp ${JENKINS_HOME_VOLUME}:/var/jenkins_home "${archive_dir}"
   #__check_home
   # [[ -d ${ARCHIVE_DIR} ]] \
   #   || mkdir -p "${ARCHIVE_DIR}"
@@ -357,20 +385,29 @@ __get_opts() {
       --open)
         __open; exit 0;
         ;;
-      --volume)
+      --create-volume)
         VOLUME_CREATE=${TRUE}
         ;;
-      --view)
+      --mount-volume)
+        VOLUME_MOUNT=${TRUE}
+        ;;
+      --view-volume)
         VOLUME_VIEW=${TRUE}
+        ;;
+      --ssh-volume)
+        VOLUME_SSH=${TRUE}
+        ;;
+      --commit-volume)
+        VOLUME_COMMIT=${TRUE}
+        ;;
+      --restore-volume)
+        VOLUME_RESTORE=${TRUE}
         ;;
       --backup)
         BACKUP=${TRUE}
         ;;
       --restore)
         RESTORE=${TRUE}
-        ;;
-      --commit)
-        VOLUME_COMMIT=${TRUE}
         ;;
       --dist)
         DISTRIBUTE=${TRUE}
@@ -393,8 +430,11 @@ __dispatch() {
 
   # volume
   (( VOLUME_CREATE )) && __create_volume
+  (( VOLUME_MOUNT )) && __mount_volume
   (( VOLUME_VIEW )) && __view_volume
+  (( VOLUME_SSH )) && __ssh_volume
   (( VOLUME_COMMIT )) && __commit_volume
+  (( VOLUME_RESTORE )) && __restore_volume
 
   # backup
   (( BACKUP )) && __backup
