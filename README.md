@@ -92,25 +92,5 @@ declare JENKINS_CONTAINER=xs-jenkins-blue
 
 ```
 
-### Jinks data directory structure, for backup and war version files. These can
-be changed in `jinks.conf.sh`.
-
-```sh
-
-~/jenkins
-  - archives
-     20180304.tgz
-  - war-files
-    - 2.111
-        jenkins.war
-    - 2.112
-        jenkins.war
-
-```
-
-### TODO:
-* Fix download of war version files
-* Confirmation on --stop
-
 
 ## [License](LICENSE.md)
