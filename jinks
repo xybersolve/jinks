@@ -70,7 +70,10 @@ declare -r SYNTAX=$(cat <<EOF
       --logs: attach to docker container logs
 
       Volume:
-      --commit: Commit jenkins_home data container to an image
+      --setup-vol:
+      --commit-vol: Commit jenkins_home data container to an image
+      --clean-vol:
+      --live-vol: Use the local Jenkins home directory
 
       Backup & Restore jenkins_home:
       --backup: Backup Jenkins home directory
@@ -84,6 +87,8 @@ declare -r SYNTAX=$(cat <<EOF
       ${PROGNAME} --start --|
       ${PROGNAME} --run ----|-- all start Jenkins
       ${PROGNAME} --up -----|
+      ${PROGNAME} --up --live-vol
+
       ${PROGNAME} --stop -----|
       ${PROGNAME} --down -----| -- all stop Jenkins
       ${PROGNAME} --restart
@@ -91,10 +96,12 @@ declare -r SYNTAX=$(cat <<EOF
       ${PROGNAME} --logs
 
       Volume:
-        ${PROGNAME} --create-volume
-        ${PROGNAME} --mount-volume
-        ${PROGNAME} --commit-volume
-        ${PROGNAME} --view-volume
+
+        ${PROGNAME} --create-vol
+        ${PROGNAME} --setup-vol
+        ${PROGNAME} --mount-vol
+        ${PROGNAME} --commit-vol
+        ${PROGNAME} --view-vol
 
       Backup & Restore:
         ${PROGNAME} --backup
@@ -126,7 +133,11 @@ declare -i VOLUME_VIEW=${FALSE}
 declare -i VOLUME_SSH=${FALSE}
 declare -i VOLUME_COMMIT=${FALSE}
 declare -i VOLUME_RESTORE=${FALSE}
+declare -i VOLUME_SETUP=${FALSE}
 declare -i VOLUME_PUSH=${FALSE}
+declare -i VOLUME_CLEAN=${FALSE}
+declare -i VOLUME_LIVE=${FALSE}
+
 # backup & restore
 declare -i BACKUP=${FALSE}
 declare -i RESTORE=${FALSE}
@@ -173,6 +184,11 @@ source "${CONFIG_FILE}" \
   || die "Unable to load config: ${CONFIG_FILE}" 1
 
 __start() {
+  local volume_arg=''
+  # use volume or local directory
+  (( VOLUME_LIVE )) \
+    && volume_arg=${JENKINS_HOME_DIR}:/var/jenkins_home \
+    || volume_arg=${JENKINS_HOME_VOLUME}:/var/jenkins_home
 
   docker run \
     --name "${JENKINS_CONTAINER}" \
@@ -180,9 +196,11 @@ __start() {
     --rm \
     -d \
     -p 8080:8080 \
-    --volumes-from "${JENKINS_HOME_CONTAINER}" \
+    -v "${volume_arg}" \
     -v /var/run/docker.sock:/var/run/docker.sock \
     "${JENKINS_IMAGE}"
+
+  #--volumes-from "${JENKINS_HOME_CONTAINER}" \
 }
 
 __restart() {
@@ -229,11 +247,20 @@ __restore_volume() {
 }
 
 __setup_volume() {
-  # these are the steps that work to persist the jenkins home volume 
-  docker create -v ${JENKINS_HOME_DIR} --name=${JENKINS_HOME_CONTAINER} busybox
+  # docker run --rm -v ~/.jenkins:/data -v my-jenkins-volume:/var/jenkins_home busybox cp -r /data /var/jenkins_home
+
+  # these are the steps that work to persist the jenkins home volume
+  #docker create -v ${JENKINS_HOME_DIR} --name=${JENKINS_HOME_CONTAINER} busybox
+  docker volume create ${JENKINS_HOME_VOLUME} || true
+  docker run -v ${JENKINS_HOME_VOLUME}:/var/jenkins_home --name=${JENKINS_HOME_CONTAINER} busybox true
+  #tar -c jobs/*/config.xml | docker run -a stdin -i --volumes-from jenkins busybox tar -xC /jenkins
   docker cp ${JENKINS_HOME_DIR}/. ${JENKINS_HOME_CONTAINER}:/var/jenkins_home
 }
 
+__clean_volume() {
+  docker container rm ${JENKINS_HOME_CONTAINER} || true
+  docker image rm ${JENKINS_HOME_IMAGE} || true
+}
 
 __view_volume() {
   #docker exec -it jenkins_home ls /var/jenkins_home
@@ -361,57 +388,33 @@ __get_opts() {
   while (( $# > 0 )); do
     local arg="${1}"; shift;
     case ${arg} in
-      --help)
-        show_help
-        ;;
-      --start|--run|--up)
-        START=${TRUE}
-        ;;
-      --stop|--down)
-        STOP=${TRUE}
-        ;;
-      --restart)
-        RESTART=${TRUE}
-        ;;
-      --logs)
-        LOGS=${TRUE}
-        ;;
-      --clean)
-        CLEAN=${TRUE}
-        ;;
-      --ssh)
-        SSH=${TRUE}
-        ;;
-      --open)
-        __open; exit 0;
-        ;;
-      --create-volume)
-        VOLUME_CREATE=${TRUE}
-        ;;
-      --mount-volume)
-        VOLUME_MOUNT=${TRUE}
-        ;;
-      --view-volume)
-        VOLUME_VIEW=${TRUE}
-        ;;
-      --ssh-volume)
-        VOLUME_SSH=${TRUE}
-        ;;
-      --commit-volume)
-        VOLUME_COMMIT=${TRUE}
-        ;;
-      --restore-volume)
-        VOLUME_RESTORE=${TRUE}
-        ;;
-      --backup)
-        BACKUP=${TRUE}
-        ;;
-      --restore)
-        RESTORE=${TRUE}
-        ;;
-      --dist)
-        DISTRIBUTE=${TRUE}
-        ;;
+      --help) show_help; exit 0;              ;;
+
+      # build & deploy actions
+      --start|--run|--up) START=${TRUE}        ;;
+      --stop|--down)      STOP=${TRUE}         ;;
+      --restart)          RESTART=${TRUE}      ;;
+      --logs)             LOGS=${TRUE}         ;;
+      --clean)            CLEAN=${TRUE}        ;;
+      --ssh)              SSH=${TRUE}          ;;
+      --open)  __open; exit 0;                 ;;
+
+      # volume actions
+      --live-vol*)      VOLUME_LIVE=${TRUE}         ;;
+      --create-vol*)    VOLUME_CREATE=${TRUE}       ;;
+      --mount-vol*)     VOLUME_MOUNT=${TRUE}        ;;
+      --view-vol*)      VOLUME_VIEW=${TRUE}         ;;
+      --ssh-vol*)       VOLUME_SSH=${TRUE}          ;;
+      --commit-vol*)    VOLUME_COMMIT=${TRUE}       ;;
+      --restore-vol*)   VOLUME_RESTORE=${TRUE}      ;;
+      --setup-vol*)     VOLUME_SETUP=${TRUE}        ;;
+      --clean-vol*)     VOLUME_CLEAN=${TRUE}        ;;
+
+      --backup)           BACKUP=${TRUE}              ;;
+      --restore)          RESTORE=${TRUE}             ;;
+
+      # support actions
+      --dist)            DISTRIBUTE=${TRUE}           ;;
       *) die "Unknown option: ${arg}" ;;
    esac
   done
@@ -435,6 +438,8 @@ __dispatch() {
   (( VOLUME_SSH )) && __ssh_volume
   (( VOLUME_COMMIT )) && __commit_volume
   (( VOLUME_RESTORE )) && __restore_volume
+  (( VOLUME_SETUP )) && __setup_volume
+  (( VOLUME_CLEAN )) && __clean_volume
 
   # backup
   (( BACKUP )) && __backup

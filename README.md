@@ -9,63 +9,59 @@ Targets both war and docker Jenkins implementations.
 jinks --help
 
 Script: jinks
-Purpose:
-Usage: jinks [-h|--help] [-v|--version]
+  Purpose: Script to manage Jenkins docker deployment
+  Usage: jinks [options]
 
-Options:
-  --help:  help and usage
-  --start: Start Jenkins using war file
+  Options:
+    --help:  help and usage
 
-  Jenkins from WAR:
-  --ver: Version of Jenkins to start
-  --versions: View local war versions
-  --home=<jenkins home direcotry>: Directory to backup/restore, default: ~/.jenkins
-  --file=<archive filename>: Archive filename (no path information required)
-  --latest: Get the latest jenkins war versions, from updates.jenkins-ci.org
-  --dist: Copy files from project to local script bin
-  --dryrun|--dry-run: Show expected source and destinations, without execution.
+    Jenkin in Docker:
+    --start|--run|--up: instantiate docker container
+    --stop|--down: bring down docker container
+    --clean: stop docker container & delete docker iamge
+    --ssh: SSH into Jenkins container
+    --logs: attach to docker container logs
 
-  Jenkin in Docker:
-  --up: start in docker container
-  --down: bring down docker container
-  --clean: stop dockler container & delete docker iamge
-  --ssh: SSH into container
-  --logs: attach to docker container logs
+    Volume:
+    --setup-vol:
+    --commit-vol: Commit jenkins_home data container to an image
+    --clean-vol:
+    --live-vol: Use the local Jenkins home directory
 
-  Backup & Restore jenkins_home:
-  --backup: Backup Jenkins home directory
-  --restore: Restore Jenkins directory
-  --archives: View archive files
+    Backup & Restore jenkins_home:
+    --backup: Backup Jenkins home directory
+    --restore: Restore Jenkins directory
+    --archives: View archive files
 
+    Maintanence:
+    --dist: Copy files from project to local script bin
 
-Examples:
-  WAR:
-    jinks --start
-    jinks --start --ver=2.114
-    jinks --start --ver=2.114 --dryrun
-    jinks --stop
-    jinks --stop --dryrun
+  Examples:
+    jinks --start --|
+    jinks --run ----|-- all start Jenkins
+    jinks --up -----|
+    jinks --up --live-vol
 
-  Docker:
-    jinks --up
+    jinks --stop -----|
+    jinks --down -----| -- all stop Jenkins
     jinks --restart
-    jinks --down
     jinks --clean
     jinks --logs
 
-  Backup & Restore:
-    jinks --backup
-    jinks --backup --home=~/jenkins_home
-    jinks --restore --file=20180405.tgz
-    jinks --restore --home=~/jenkins_home --file=20180405.tgz
+    Volume:
 
-  Helpers:
-    jinks --latest
-    jinks --archives
-    jinks --versions
+      jinks --create-vol
+      jinks --setup-vol
+      jinks --mount-vol
+      jinks --commit-vol
+      jinks --view-vol
 
-  Distribute (move files to script bin):
-    jinks --dist
+    Backup & Restore:
+      jinks --backup
+      jinks --restore
+
+    Distribute (move files to script bin):
+      jinks --dist
 ```
 
 ### jinks.conf.sh - configuration file

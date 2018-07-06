@@ -22,5 +22,5 @@ declare JENKINS_CONTAINER=xs-jenkins-blue
 
 # volume
 declare JENKINS_HOME_VOLUME=xs_jenkins_home
-declare JENKINS_HOME_IMAGE=xs_jenkins_home
+declare JENKINS_HOME_IMAGE=xs_jenkins_home:latest
 declare JENKINS_HOME_CONTAINER=xs_jenkins_home
