@@ -5,9 +5,7 @@
 # ****************************************************************
 #
 # DESCRIPTION
-#   Jenkins helper script
-#    * start jenkins from war file
-#    * backup and restore Jenkins
+#   Manage Jenkins in Docker deployment
 #
 # SYNTAX & EXAMPLES
 #    See 'SYNTAX' (below)
@@ -26,8 +24,6 @@
 #
 # ---------------------------------------------------------------
 #
-# TODO: Refactor WAR backup & restore to dockerized backup & restore
-# TODO: Finish docker-compose & make, i.e., map jenkins_home
 # ****************************************************************
 
 
@@ -56,7 +52,7 @@ declare -ri MIN_ARG_COUNT=1
 declare -r SYNTAX=$(cat <<EOF
 
     Script: ${PROGNAME}
-    Purpose:
+    Purpose: Manage Jenkins docker deployment
     Usage: ${PROGNAME} [options]
 
     Options:
@@ -68,6 +64,7 @@ declare -r SYNTAX=$(cat <<EOF
       --clean: stop docker container & delete docker iamge
       --ssh: SSH into Jenkins container
       --logs: attach to docker container logs
+      --open: open Jenkins in browser, targeting active docker-machine IP
 
       Volume:
       --setup-vol:
@@ -81,7 +78,7 @@ declare -r SYNTAX=$(cat <<EOF
       --archives: View archive files
 
       Maintanence:
-      --dist: Copy files from project to local script bin
+      ./dist --copy: Copy files from project to bin directory
 
     Examples:
       ${PROGNAME} --start --|
@@ -95,8 +92,12 @@ declare -r SYNTAX=$(cat <<EOF
       ${PROGNAME} --clean
       ${PROGNAME} --logs
 
-      Volume:
+      After Plugin Update & Restart
+        ${PROGNAME} --down
+        ${PROGNAME} --up
+        ${PROGNAME} --open
 
+      Volume Management:
         ${PROGNAME} --create-vol
         ${PROGNAME} --setup-vol
         ${PROGNAME} --mount-vol
@@ -108,7 +109,7 @@ declare -r SYNTAX=$(cat <<EOF
         ${PROGNAME} --restore
 
       Distribute (move files to script bin):
-        ${PROGNAME} --dist
+        ./dist --copy
 
 EOF
 )
@@ -121,11 +122,12 @@ declare -r CONFIG_FILE="${SCRIPT_DIR}/jinks.conf.sh"
 # docker main
 declare -i START=${FALSE}
 declare -i STOP=${FALSE}
-declare -i RESTART=${FALSE}
 declare -i LOGS=${FALSE}
 declare -i DOWN=${FALSE}
 declare -i CLEAN=${FALSE}
 declare -i SSH=${FALSE}
+declare -i OPEN=${FALSE}
+
 # volume
 declare -i VOLUME_CREATE=${FALSE}
 declare -i VOLUME_MOUNT=${FALSE}
@@ -203,10 +205,6 @@ __start() {
   #--volumes-from "${JENKINS_HOME_CONTAINER}" \
 }
 
-__restart() {
-  docker container restart "${JENKINS_CONTAINER}"
-
-}
 
 __logs() {
   docker logs "${JENKINS_CONTAINER}"
@@ -216,6 +214,7 @@ __logs() {
 __stop() {
   docker container stop "${JENKINS_CONTAINER}" || true
 }
+
 
 __clean() {
   __stop
@@ -303,85 +302,12 @@ __backup() {
 
   [[ -d "${archive_dir}" ]] || mkdir -p "${archive_dir}"
   docker cp ${JENKINS_HOME_VOLUME}:/var/jenkins_home "${archive_dir}"
-  #__check_home
-  # [[ -d ${ARCHIVE_DIR} ]] \
-  #   || mkdir -p "${ARCHIVE_DIR}"
-  #
-  # if (( DRYRUN )); then
-  #   echo
-  #   echo "Back up Jenkins home directory"
-  #   echo "From: ${JENKINS_HOME_DIR}"
-  #   echo "To: ${archive_file}"
-  #   echo
-  # else
-  #   cd "${JENKINS_HOME_DIR}"
-  #
-  #   tar -czf "${archive_file}" . &>/dev/null \
-  #     && printf "\n🍄  Backed Jenkins up to:\n\t%s\n\n" "${archive_file}" \
-  #     || printf "\n☠️  Failed to back up Jenkins to:\n\t%s\n\n" "${archive_file}"
-  # fi
 }
 
 __restore() {
   local dest_dir
   local archive_file
   :
-  # [[ -z ${FILENAME} ]] \
-  #   && die "No archive file was specified, use --file=<filename>" 3
-  #
-  # archive_file="${ARCHIVE_DIR}/${FILENAME}"
-  #
-  # __check_home
-  #
-  # # check if the file is there
-  # [[ -f "${archive_file}" ]] \
-  #   || die "☠️  Unable to find archive: ${archive_file}" 2
-  #
-  # if (( DRYRUN )); then
-  #   echo
-  #   echo "Restore Jenkins home directory"
-  #   echo "From: ${archive_file}"
-  #   echo "To: ${JENKINS_HOME_DIR}"
-  #   echo
-  # else
-  #   tar -xzf "${archive_file}" -C "${JENKINS_HOME_DIR}" \
-  #     && printf "\n🍄  Restored Jenkins to:\n\t%s\n\n" "${JENKINS_HOME_DIR}" \
-  #     || printf "\n☠️  Failed to restore Jenkins from:\n\t%s\n\n" "${archive_file}"
-  # fi
-}
-
-__choose_restore() {
-  # echo "${vers[@]}"
-  # PS3="Select version to start: "
-  # select ver in "${LOCAL_VERSIONS[@]}" "Abort"; do
-  #   if [[  $ver = "Abort" ]]; then
-  #     exit 0
-  #   else
-  #     # pull the key from the value
-  #     JENKINS_VER=${ver}
-  #     return
-  #   fi
-  # done
-  :
-}
-
-
-__distribute() {
-  # move files into script bin
-  echo "Distribute ${PROGNAME}"
-
-  local file=''
-  local -r dest=~/bin
-  local -ra files=(
-    "${PROGNAME}"
-    "${CONFIG_FILE}"
-  )
-  printf "\n"
-  for file in "${files[@]}"; do
-    cp "${file}" "${dest}" \
-      && printf "👍🏻  Copied: %s to %s\n" "${file}" "${dest}"
-  done
-  printf "\n"
 }
 
 __get_opts() {
@@ -393,11 +319,10 @@ __get_opts() {
       # build & deploy actions
       --start|--run|--up) START=${TRUE}        ;;
       --stop|--down)      STOP=${TRUE}         ;;
-      --restart)          RESTART=${TRUE}      ;;
       --logs)             LOGS=${TRUE}         ;;
       --clean)            CLEAN=${TRUE}        ;;
       --ssh)              SSH=${TRUE}          ;;
-      --open)  __open; exit 0;                 ;;
+      --open)             OPEN=${TRUE}         ;;
 
       # volume actions
       --live-vol*)      VOLUME_LIVE=${TRUE}         ;;
@@ -410,11 +335,10 @@ __get_opts() {
       --setup-vol*)     VOLUME_SETUP=${TRUE}        ;;
       --clean-vol*)     VOLUME_CLEAN=${TRUE}        ;;
 
+      # support - stubbed
       --backup)           BACKUP=${TRUE}              ;;
       --restore)          RESTORE=${TRUE}             ;;
 
-      # support actions
-      --dist)            DISTRIBUTE=${TRUE}           ;;
       *) die "Unknown option: ${arg}" ;;
    esac
   done
@@ -425,9 +349,9 @@ __dispatch() {
   (( START )) && __start
   (( STOP )) && __stop
   (( RESTORE )) && __restore
-  (( RESTART )) && __restart
   (( SSH )) && __ssh
   (( LOGS )) && __logs
+  (( OPEN )) && __open
   (( DOWN )) && __down
   (( CLEAN )) && __clean
 

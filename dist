@@ -31,9 +31,8 @@ __copy() {
 }
 
 __control() {
-  :
-  #ssh control mkdir -p /home/ubuntu/bin/xs-swarm
-  #scp -r ~/bin/xs-swarm/* control:/home/ubuntu/bin/xs-swarm/
+  ssh control mkdir -p /home/ubuntu/bin/xs-jinks
+  scp -r ~/bin/xs-jinks/* control:/home/ubuntu/bin/xs-jinks/
 }
 #
 # Flags are for extensibility,
@@ -43,12 +42,14 @@ declare FLAG=${1:-help}
 case ${FLAG} in
   --copy|copy) __copy; exit 0; ;;
   --all|all) __copy; exit 0;  ;;
+  --control|ctrl) __control; exit 0; ;;
   --help|help)
     echo '
     Usage
       ./dist --help
       ./dist --copy
       ./dist --all
+      ./dist --control
     '
     exit 0
     ;;

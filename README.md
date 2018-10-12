@@ -1,7 +1,7 @@
 # jinks
 
-> Script provides functionality around Jenkins configuration and instantiation.
-Targets both war and docker Jenkins implementations.
+> Script provides functionalityconfiguration and instantiation of Jenkins in
+docker implementations.
 
 ### Syntax and Usage, from --help
 ```sh
@@ -49,7 +49,6 @@ Script: jinks
     jinks --logs
 
     Volume:
-
       jinks --create-vol
       jinks --setup-vol
       jinks --mount-vol
@@ -59,9 +58,6 @@ Script: jinks
     Backup & Restore:
       jinks --backup
       jinks --restore
-
-    Distribute (move files to script bin):
-      jinks --dist
 ```
 
 ### jinks.conf.sh - configuration file
@@ -89,6 +85,15 @@ declare JENKINS_VER='2.107'
 # xybersolve jenkins blueocean
 declare JENKINS_IMAGE=xybersolve/xs-jenkins-blue:latest
 declare JENKINS_CONTAINER=xs-jenkins-blue
+
+```
+
+### Distribute scripts to bin
+Support script move project scripts into bin directory and PATH.
+
+```sh
+
+$ ./dist --copy
 
 ```
 
